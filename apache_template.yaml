@@ -1,0 +1,101 @@
+apiVersion: v1 
+kind: Template
+metadata:
+  name: slow-backends-template
+objects:
+
+  # apache proxy
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: ${APP}-apache
+      labels:
+        app: ${APP}
+        pod-selector: apache
+    spec:
+      containers:
+        - name: redhat-httpd
+          image: registry.redhat.io/rhel8/httpd-24
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: httpd-data
+              mountPath: /var/www/html
+          env:
+            - name: HTTPD_CONF
+              value: |
+                # start custom config;
+                # start custom config;
+                # start custom config;
+                #;
+                <VirtualHost *:8080> ;
+                ServerName localhost;
+
+                ProxyPass "/flask/" "http://${FLASK_HOST}/";
+                ProxyPassReverse "/flask/" "http://${FLASK_HOST}/";
+
+                ErrorLog /var/log/httpd/proxy_error.log;
+                CustomLog /var/log/httpd/proxy_access_log.log combined;
+                </VirtualHost>;
+
+                Timeout 1400;
+                ProxyTimeout 1400;
+
+                ## end of custom config;
+                ## end of custom config;
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo $HTTPD_CONF |tr ';' '\n' >> /etc/httpd/conf/httpd.conf &&
+              sed -i.del 's/IncludeOptional/#IncludeOptional/' /etc/httpd/conf/httpd.conf &&
+              nl /etc/httpd/conf/httpd.conf &&
+              httpd -DFOREGROUND; sleep infinity
+
+      volumes:
+        - name: httpd-data
+          emptyDir: {}
+  # service for apache app
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: ${APP}-apache-service
+      labels: 
+        app: ${APP}
+    spec:
+      ports:
+      - port: 80
+        protocol: TCP
+        targetPort: 8080
+      selector:
+        app: ${APP}
+        pod-selector: apache
+      sessionAffinity: None
+      type: ClusterIP
+
+  # route for apache app
+  - apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata:
+      name: ${APP}-apache-route
+      labels:
+        app: ${APP}
+      annotations:
+        haproxy.router.openshift.io/timeout: "10m"
+    spec:
+      path: /
+      port:
+        targetPort: 8080
+      to:
+        kind: Service
+        name: ${APP}-apache-service
+        weight: 100
+      wildcardPolicy: None
+
+parameters:
+  - name: APP
+    description: app
+    value: apache-template-param-value
+  - name: FLASK_HOST
+    description: FLASK_HOST
+    value: flask-route-param-value
+

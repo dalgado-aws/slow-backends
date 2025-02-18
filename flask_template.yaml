@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: slow-backends-template
+objects:
+
+  # flask app serving slow responses at /wait/5minutes
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: ${APP}-flask-server
+      labels:
+        app: ${APP}
+        pod-selector: flask
+    spec:
+      containers:
+        - name: ${APP}-container
+          image: python:3.9
+          ports:
+            - containerPort: 5000
+          env:
+            - name: FLASK_APP_CODE
+              value: |
+                from flask import Flask
+                import time
+    
+                app = Flask(__name__)
+    
+                @app.route('/wait/<int:minutes>')
+                def wait(minutes):
+                    print(f"will wait for {minutes} minutes")
+                    time.sleep(minutes * 60)
+                    return f"Waited {minutes} minutes before responding!", 200
+
+                @app.route('/check')
+                def check():
+                    print(f"check ok ")
+                    return f"check ok!", 200
+    
+                if __name__ == '__main__':
+                    app.run(host='0.0.0.0', port=5000)
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              python -m venv /tmp/my_venv &&  
+              . /tmp/my_venv/bin/activate &&  
+              pip install flask &&  
+              echo "$FLASK_APP_CODE" > /tmp/app.py && 
+              echo "###########################" &&
+              cat /tmp/app.py &&
+              echo "###########################" &&
+              python /tmp/app.py
+
+  # service for flask app
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: ${APP}-flask-service
+      labels: 
+        app: ${APP}
+    spec:
+      ports:
+      - port: 80
+        protocol: TCP
+        targetPort: 5000
+      selector:
+        pod-selector: flask
+      sessionAffinity: None
+      type: ClusterIP
+
+  # route for flask app
+  - apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata:
+      name: ${APP}-flask-route
+      labels:
+        app: ${APP}
+      annotations:
+        haproxy.router.openshift.io/timeout: "10m"
+    spec:
+      path: /
+      port:
+        targetPort: 5000
+      to:
+        kind: Service
+        name: ${APP}-flask-service
+        weight: 100
+      wildcardPolicy: None
+
+parameters:
+  - name: APP
+    description: app name
+    value: slow-backends-app-lion
+
