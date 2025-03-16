@@ -1,0 +1,131 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: nginx-proxy-template
+objects:
+  # nginx proxy
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: ${APP}-nginx
+      labels:
+        app: ${APP}
+        pod-selector: nginx
+
+    spec:
+      volumes:
+      - name: nginx-temp
+        emptyDir: {}
+      restartPolicy: Always
+      containers:
+        - name: nginx
+          image: nginx:latest
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+            - name: nginx-temp
+              mountPath: /tmp
+          env:
+            - name: NGINX_CONF
+              value: |
+                worker_processes 1;                                                        ^
+                error_log /tmp/error.log;                                                  ^
+                pid /tmp/nginx.pid;                                                        ^
+                events {                                                                   ^
+                  worker_connections 1024;                                                 ^
+                }                                                                          ^
+                http {                                                                     ^
+                                                                                           ^
+                  log_format detailed '$remote_addr - $remote_user [$time_local] '         ^
+                                     '"$request" $status $body_bytes_sent '                ^
+                                     '"$http_referer" "$http_user_agent" '                 ^
+                                     'TARGET_URL="$scheme://$host$request_uri"';           ^
+                                                                                           ^
+                                                                                           ^
+                  proxy_connect_timeout 600s;                                              ^
+                  proxy_send_timeout    600s;                                              ^
+                  proxy_read_timeout    600s;                                              ^
+                  proxy_next_upstream_timeout 600s;                                        ^
+                                                                                           ^
+                  proxy_buffer_size          128k;                                         ^
+                  proxy_buffers              4 256k;                                       ^
+                  proxy_busy_buffers_size    256k;                                         ^
+                                                                                           ^
+                  client_max_body_size       10m;                                          ^
+                                                                                           ^
+                  client_body_timeout        600s;                                         ^
+                  client_header_timeout      600s;                                         ^
+                  keepalive_timeout          600s;                                         ^
+                  send_timeout               600s;                                         ^
+                  access_log /dev/stdout detailed;                                         ^
+                                                                                           ^
+                  client_body_temp_path /tmp/client_temp;                                  ^
+                  proxy_temp_path /tmp/proxy_temp;                                         ^
+                  fastcgi_temp_path /tmp/fastcgi_temp;                                     ^
+                  uwsgi_temp_path /tmp/uwsgi_temp;                                         ^
+                  scgi_temp_path /tmp/scgi_temp;                                           ^
+                                                                                           ^
+                  server {                                                                 ^
+                    listen 8080;                                                           ^
+                    server_name localhost;                                                 ^
+                                                                                           ^
+                    location /flask/ {                                                     ^
+                      rewrite ^/flask/(.*)$ /$1 break;                                     ^
+                      proxy_pass http://${FLASK_HOST};                                     ^
+                      proxy_set_header X-Real-IP $remote_addr;                             ^
+                      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;         ^
+                      proxy_set_header X-Forwarded-Proto $scheme;                          ^
+                    }                                                                      ^
+                  }                                                                        ^
+                }                                                                          ^
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo $NGINX_CONF | tr '^' '\n' > /tmp/nginx.conf;
+              nginx -c /tmp/nginx.conf; sleep infinity
+
+  # service for nginx app
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: ${APP}-nginx-service
+      labels:
+        app: ${APP}
+    spec:
+      ports:
+      - port: 80
+        protocol: TCP
+        targetPort: 8080
+      selector:
+        app: ${APP}
+        pod-selector: nginx
+      sessionAffinity: None
+      type: ClusterIP
+
+    # route for nginx app
+  - apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata:
+      name: ${APP}-nginx-route
+      labels:
+        app: ${APP}
+      annotations:
+        haproxy.router.openshift.io/timeout: "10m"
+    spec:
+      path: /
+      port:
+        targetPort: 8080
+      to:
+        kind: Service
+        name: ${APP}-nginx-service
+        weight: 100
+      wildcardPolicy: None
+
+parameters:
+- name: APP
+  description: app
+  value: apache-template-param-value
+- name: FLASK_HOST
+  description: FLASK_HOST
+  value: flask-route-param-value

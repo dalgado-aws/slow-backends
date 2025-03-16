@@ -91,4 +91,3 @@ parameters:
   - name: APP
     description: app name
     value: slow-backends-app-lion
-

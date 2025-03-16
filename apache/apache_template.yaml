@@ -3,7 +3,6 @@ kind: Template
 metadata:
   name: slow-backends-template
 objects:
-
   # apache proxy
   - apiVersion: v1
     kind: Pod
@@ -54,6 +53,7 @@ objects:
       volumes:
         - name: httpd-data
           emptyDir: {}
+
   # service for apache app
   - apiVersion: v1
     kind: Service
